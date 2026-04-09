@@ -22,6 +22,11 @@ func NewService(repo Repository) *Service {
 	}
 }
 
+// Считаем, сколько дней в месяце
+func daysInMonth(year int, month time.Month) int {
+	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
 func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Task, error) {
 	normalized, err := validateCreateInput(input, s.now())
 	if err != nil {
@@ -194,8 +199,9 @@ func normalizeSchedule(intervalType taskdomain.IntervalType, intervalDays *int, 
 		next := dayStartUTC(now).AddDate(0, 0, days)
 		result.NextRunAt = &next
 	case taskdomain.IntervalMonthly:
-		if dayOfMonth == nil || *dayOfMonth < 1 || *dayOfMonth > 30 {
-			return schedule{}, fmt.Errorf("%w: day_of_month must be from 1 to 30 for monthly interval", ErrInvalidInput)
+		// Проверяем, что день месяца в допустимом диапазоне
+		if dayOfMonth == nil || *dayOfMonth < 1 || *dayOfMonth > 31 {
+			return schedule{}, fmt.Errorf("%w: day_of_month must be from 1 to 31 for monthly interval", ErrInvalidInput)
 		}
 		day := *dayOfMonth
 		result.DayOfMonth = &day
@@ -224,7 +230,6 @@ func normalizeSchedule(intervalType taskdomain.IntervalType, intervalDays *int, 
 	return result, nil
 }
 
-// Получение начала дня в UTC
 func dayStartUTC(t time.Time) time.Time {
 	u := t.UTC()
 	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
@@ -234,11 +239,30 @@ func dayStartUTC(t time.Time) time.Time {
 func nextMonthlyRun(now time.Time, day int) time.Time {
 	current := dayStartUTC(now)
 	year, month, _ := current.Date()
-	candidate := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
-	if candidate.Before(current) {
-		candidate = time.Date(year, month+1, day, 0, 0, 0, 0, time.UTC)
+
+	for {
+		lastDay := daysInMonth(year, month)
+
+		actualDay := day
+
+		// если в следующем месяце меньше дней чем дата задачи, кидаем задачу на последний день месяца
+		if day > lastDay {
+			actualDay = lastDay
+		}
+
+		candidate := time.Date(year, month, actualDay, 0, 0, 0, 0, time.UTC)
+
+		if !candidate.Before(current) {
+			return candidate
+		}
+
+		// следующий месяц
+		month++
+		if month > 12 {
+			month = 1
+			year++
+		}
 	}
-	return candidate
 }
 
 // Вычисление следующей даты для интервала по четности
