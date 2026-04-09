@@ -22,7 +22,7 @@ docker compose down -v
 docker compose up --build
 ```
 
-Причина в том, что SQL-файл из migrations/0001_create_tasks.up.sql монтируется в docker-entrypoint-initdb.d и применяется только при инициализации пустого data volume. (добавлен файл 0002_add_task_recurrence.up.sql) 
+Причина в том, что SQL-файл из migrations/0001_create_tasks.up.sql монтируется в docker-entrypoint-initdb.d и применяется только при инициализации пустого data volume. (добавлен файл 0002_add_task_recurrence.up.sql для примеров с периодичностью) 
 
 ## Swagger
 
@@ -97,11 +97,12 @@ http://localhost:8080/swagger/openapi.json
 
 ## Ограничения
 
-- Расчеты дат ведутся в UTC
-- В ежемесячных задачах `next_run_at` рассчитывается при запросах create/update и не продлевается автоматически
+- Расчет дат в UTC
 
 ## Особенности
 
+- Задачи продлеваются два раза в день - в 6 и 18 часов с помощью планировщика (запускается как горутина в main)
 - Даты для `specific_dates` принимаем в формате `YYYY-MM-DD`
 - Для четности считаем, что `is_even=true` означает запуск по четным числам месяца, `false` — по нечетным
-- Для `nil` любые дополнительные поля периодичности игнорируем
+- Для `none` любые дополнительные поля периодичности игнорируем
+
