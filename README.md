@@ -1,6 +1,6 @@
-# Task Service With Periodic Tasks
+# Task Service
 
-Сервис для управления задачами на Go.
+Сервис для управления задачами с HTTP API на Go.
 
 ## Требования
 
@@ -22,7 +22,7 @@ docker compose down -v
 docker compose up --build
 ```
 
-Причина в том, что SQL-файлы из `migrations/*.sql` монтируются в `docker-entrypoint-initdb.d` и применяются только при инициализации пустого data volume.
+Причина в том, что SQL-файл из migrations/0001_create_tasks.up.sql монтируется в docker-entrypoint-initdb.d и применяется только при инициализации пустого data volume. (добавлен файл 0002_add_task_recurrence.up.sql) 
 
 ## Swagger
 
