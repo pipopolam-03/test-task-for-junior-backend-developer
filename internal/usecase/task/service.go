@@ -44,9 +44,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Ta
 		SpecificDates: normalized.SpecificDates,
 		NextRunAt:     normalized.NextRunAt,
 	}
+
 	now := s.now()
 	model.CreatedAt = now
 	model.UpdatedAt = now
+	next := s.calculateNextRun(*model, s.now())
+	model.NextRunAt = &next
 
 	created, err := s.repo.Create(ctx, model)
 	if err != nil {
@@ -70,6 +73,7 @@ func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*tas
 	}
 
 	normalized, err := validateUpdateInput(input, s.now())
+
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +91,9 @@ func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*tas
 		NextRunAt:     normalized.NextRunAt,
 		UpdatedAt:     s.now(),
 	}
+
+	next := s.calculateNextRun(*model, s.now())
+	model.NextRunAt = &next
 
 	updated, err := s.repo.Update(ctx, model)
 	if err != nil {
@@ -134,7 +141,6 @@ func validateCreateInput(input CreateInput, now time.Time) (CreateInput, error) 
 	input.DayOfMonth = normalizedSchedule.DayOfMonth
 	input.IsEven = normalizedSchedule.IsEven
 	input.SpecificDates = normalizedSchedule.SpecificDates
-	input.NextRunAt = normalizedSchedule.NextRunAt
 
 	return input, nil
 }
@@ -161,7 +167,6 @@ func validateUpdateInput(input UpdateInput, now time.Time) (UpdateInput, error) 
 	input.DayOfMonth = normalizedSchedule.DayOfMonth
 	input.IsEven = normalizedSchedule.IsEven
 	input.SpecificDates = normalizedSchedule.SpecificDates
-	input.NextRunAt = normalizedSchedule.NextRunAt
 
 	return input, nil
 }
@@ -172,9 +177,9 @@ type schedule struct {
 	DayOfMonth    *int
 	IsEven        *bool
 	SpecificDates []string
-	NextRunAt     *time.Time
 }
 
+// Нормализация и валидация расписания
 func normalizeSchedule(intervalType taskdomain.IntervalType, intervalDays *int, dayOfMonth *int, isEven *bool, specificDates []string, now time.Time) (schedule, error) {
 	if intervalType == "" {
 		intervalType = taskdomain.IntervalNone
@@ -186,45 +191,41 @@ func normalizeSchedule(intervalType taskdomain.IntervalType, intervalDays *int, 
 
 	result := schedule{IntervalType: intervalType}
 
-	// Обработка типов периодичности с проверкой ошибок
 	switch intervalType {
+
 	case taskdomain.IntervalNone:
 		return result, nil
+
 	case taskdomain.IntervalDaily:
 		if intervalDays == nil || *intervalDays <= 0 {
 			return schedule{}, fmt.Errorf("%w: interval_days must be >= 1 for daily interval", ErrInvalidInput)
 		}
 		days := *intervalDays
 		result.IntervalDays = &days
-		next := dayStartUTC(now).AddDate(0, 0, days)
-		result.NextRunAt = &next
+
 	case taskdomain.IntervalMonthly:
-		// Проверяем, что день месяца в допустимом диапазоне
 		if dayOfMonth == nil || *dayOfMonth < 1 || *dayOfMonth > 31 {
 			return schedule{}, fmt.Errorf("%w: day_of_month must be from 1 to 31 for monthly interval", ErrInvalidInput)
 		}
 		day := *dayOfMonth
 		result.DayOfMonth = &day
-		next := nextMonthlyRun(now, day)
-		result.NextRunAt = &next
+
 	case taskdomain.IntervalParity:
 		if isEven == nil {
 			return schedule{}, fmt.Errorf("%w: is_even is required for parity interval", ErrInvalidInput)
 		}
 		parity := *isEven
 		result.IsEven = &parity
-		next := nextParityRun(now, parity)
-		result.NextRunAt = &next
+
 	case taskdomain.IntervalSpecific:
 		if len(specificDates) == 0 {
 			return schedule{}, fmt.Errorf("%w: specific_dates must not be empty for dates interval", ErrInvalidInput)
 		}
-		normalizedDates, nextRunAt, err := normalizeSpecificDates(specificDates, now)
+		normalizedDates, _, err := normalizeSpecificDates(specificDates, now)
 		if err != nil {
 			return schedule{}, err
 		}
 		result.SpecificDates = normalizedDates
-		result.NextRunAt = nextRunAt
 	}
 
 	return result, nil
@@ -235,7 +236,7 @@ func dayStartUTC(t time.Time) time.Time {
 	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// Вычисление следующей даты для ежемесячного интервала
+// Вычисление следующей даты для ежемесячных заадч
 func nextMonthlyRun(now time.Time, day int) time.Time {
 	current := dayStartUTC(now)
 	year, month, _ := current.Date()
@@ -243,9 +244,8 @@ func nextMonthlyRun(now time.Time, day int) time.Time {
 	for {
 		lastDay := daysInMonth(year, month)
 
+		// Если в след. месяце меньше дней - задачу планируем на последний
 		actualDay := day
-
-		// если в следующем месяце меньше дней чем дата задачи, кидаем задачу на последний день месяца
 		if day > lastDay {
 			actualDay = lastDay
 		}
@@ -256,7 +256,6 @@ func nextMonthlyRun(now time.Time, day int) time.Time {
 			return candidate
 		}
 
-		// следующий месяц
 		month++
 		if month > 12 {
 			month = 1
@@ -265,7 +264,6 @@ func nextMonthlyRun(now time.Time, day int) time.Time {
 	}
 }
 
-// Вычисление следующей даты для интервала по четности
 func nextParityRun(now time.Time, even bool) time.Time {
 	candidate := dayStartUTC(now)
 	for {
@@ -276,7 +274,102 @@ func nextParityRun(now time.Time, even bool) time.Time {
 	}
 }
 
-// Нормализация и валидация списка дат
+func (s *Service) calculateNextRun(task taskdomain.Task, now time.Time) time.Time {
+	switch task.IntervalType {
+
+	case taskdomain.IntervalDaily:
+		if task.IntervalDays == nil {
+			return now
+		}
+		return dayStartUTC(now).AddDate(0, 0, *task.IntervalDays)
+
+	case taskdomain.IntervalMonthly:
+		if task.DayOfMonth == nil {
+			return now
+		}
+		return nextMonthlyRun(now, *task.DayOfMonth)
+
+	case taskdomain.IntervalParity:
+		if task.IsEven == nil {
+			return now
+		}
+		return nextParityRun(now, *task.IsEven)
+
+	case taskdomain.IntervalSpecific:
+		_, nextRunAt, err := normalizeSpecificDates(task.SpecificDates, now)
+		if err != nil || nextRunAt == nil {
+			return now
+		}
+		return *nextRunAt
+
+	default:
+		return now
+	}
+}
+
+// Выбор времени для обновления задачи планировщиком
+func nextRunDelay(now time.Time) time.Duration {
+	now = now.UTC()
+
+	year, month, day := now.Date()
+
+	morning := time.Date(year, month, day, 6, 0, 0, 0, time.UTC)
+	evening := time.Date(year, month, day, 18, 0, 0, 0, time.UTC)
+
+	switch {
+	case now.Before(morning):
+		return morning.Sub(now)
+	case now.Before(evening):
+		return evening.Sub(now)
+	default:
+		nextMorning := morning.AddDate(0, 0, 1)
+		return nextMorning.Sub(now)
+	}
+}
+
+// Логика планировщика
+func (s *Service) runScheduledTasks(ctx context.Context) {
+	now := s.now()
+
+	tasks, err := s.repo.List(ctx)
+	if err != nil {
+		return
+	}
+
+	for _, task := range tasks {
+		if task.NextRunAt == nil || task.NextRunAt.After(now) {
+			continue
+		}
+
+		next := s.calculateNextRun(task, now)
+		task.NextRunAt = &next
+		task.UpdatedAt = now
+
+		if _, err := s.repo.Update(ctx, &task); err != nil {
+			continue
+		}
+	}
+}
+
+// Запуск планировщика в фоне
+func (s *Service) StartScheduler(ctx context.Context) {
+	go func() {
+		for {
+			delay := nextRunDelay(s.now())
+			timer := time.NewTimer(delay)
+
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+				s.runScheduledTasks(ctx)
+			}
+		}
+	}()
+}
+
+// Нормализация и валидация specific_dates
 func normalizeSpecificDates(raw []string, now time.Time) ([]string, *time.Time, error) {
 	normalized := make([]string, 0, len(raw))
 	parsed := make([]time.Time, 0, len(raw))
@@ -298,6 +391,7 @@ func normalizeSpecificDates(raw []string, now time.Time) ([]string, *time.Time, 
 			continue
 		}
 		seen[formatted] = struct{}{}
+
 		normalized = append(normalized, formatted)
 		parsed = append(parsed, dayStartUTC(date))
 	}
