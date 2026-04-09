@@ -31,6 +31,12 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
+		// Новые поля для периодичности
+		IntervalType:  req.IntervalType,
+		IntervalDays:  req.IntervalDays,
+		DayOfMonth:    req.DayOfMonth,
+		IsEven:        req.IsEven,
+		SpecificDates: req.SpecificDates,
 	})
 	if err != nil {
 		writeUsecaseError(w, err)
@@ -73,6 +79,12 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
+		// Новые поля для периодичности
+		IntervalType:  req.IntervalType,
+		IntervalDays:  req.IntervalDays,
+		DayOfMonth:    req.DayOfMonth,
+		IsEven:        req.IsEven,
+		SpecificDates: req.SpecificDates,
 	})
 	if err != nil {
 		writeUsecaseError(w, err)

@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"time"
 
 	taskdomain "example.com/taskservice/internal/domain/task"
 )
@@ -23,13 +24,25 @@ type Usecase interface {
 }
 
 type CreateInput struct {
-	Title       string
-	Description string
-	Status      taskdomain.Status
+	Title         string
+	Description   string
+	Status        taskdomain.Status
+	IntervalType  taskdomain.IntervalType
+	IntervalDays  *int
+	DayOfMonth    *int
+	IsEven        *bool
+	SpecificDates []string
+	NextRunAt     *time.Time
 }
 
 type UpdateInput struct {
-	Title       string
-	Description string
-	Status      taskdomain.Status
+	Title         string
+	Description   string
+	Status        taskdomain.Status
+	IntervalType  taskdomain.IntervalType
+	IntervalDays  *int
+	DayOfMonth    *int
+	IsEven        *bool
+	SpecificDates []string
+	NextRunAt     *time.Time
 }
